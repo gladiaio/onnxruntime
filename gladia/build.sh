@@ -26,10 +26,13 @@ python3 -m venv /venv
 pip install -q numpy packaging wheel setuptools 'cmake>=3.28,<4' sympy flatbuffers protobuf
 mkdir -p "$OUT"
 cd /src
+# the checkout is mounted from the runner's user, this container is root: git refuses it otherwise
+git config --global --add safe.directory /src
 test "$(cat VERSION_NUMBER)" = "$VERSION"
 python3 tools/ci_build/build.py --build_dir /build --config Release \
   --update --build --build_wheel --parallel "$MAX_JOBS" --nvcc_threads 1 --skip_tests \
-  --allow_running_as_root --use_cache --use_cuda --cuda_home /usr/local/cuda --cudnn_home /usr \
+  --allow_running_as_root --use_cache --skip_submodule_sync --use_cuda \
+  --cuda_home /usr/local/cuda --cudnn_home /usr \
   --cmake_generator Ninja \
   --cmake_extra_defines "CMAKE_CUDA_ARCHITECTURES=$ARCHS" onnxruntime_BUILD_UNIT_TESTS=OFF
 python3 "$HERE/retag.py" /build/Release/dist/onnxruntime_gpu-*.whl "cu130.gladia${REV}" \
