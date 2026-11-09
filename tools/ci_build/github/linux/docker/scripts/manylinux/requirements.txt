@@ -4,7 +4,7 @@ mypy
 pytest
 setuptools>=84.1.0
 wheel
-protobuf==6.33.6
+protobuf==7.36.2
 sympy==1.14
 flatbuffers
 neural-compressor>=2.2.1
