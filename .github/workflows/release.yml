@@ -94,7 +94,9 @@ jobs:
           free -g
       # ccache across runs: a REV bump, or a build of another upstream release, recompiles only what
       # changed (the first build of a release is cold: 6 h is the job's ceiling, a cold build fits)
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      # restore only: the save below runs even when the build stops at its time limit, so a cold
+      # build that does not fit one job resumes in the next run from what it compiled
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ccache
           key: ccache-cu130-${{ needs.plan.outputs.version }}-${{ github.run_id }}
@@ -105,12 +107,20 @@ jobs:
         run: |
           mkdir -p dist ccache
           start=$SECONDS
-          docker run --rm -e VERSION -e REV -e MAX_JOBS -e ARCHS -e CCACHE_DIR=/ccache \
+          # 320 min: the step stops before the job's 355, leaving time to save the cache
+          timeout 320m docker run --rm -e VERSION -e REV -e MAX_JOBS -e ARCHS -e CCACHE_DIR=/ccache \
             -e CCACHE_MAXSIZE=8G -v "$PWD/src:/src" -v "$PWD/dist:/out" -v "$PWD/ccache:/ccache" \
             -v "$PWD/gladia-src/gladia:/gladia:ro" \
             "$IMAGE" bash /gladia/build.sh "$VERSION" "$REV" /out
           echo "built in $(( (SECONDS - start) / 60 )) min"
-          sudo chown -R "$(id -u)" dist ccache
+      - name: Save the compiler cache
+        if: always()
+        run: sudo chown -R "$(id -u)" dist ccache
+      - if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ccache
+          key: ccache-cu130-${{ needs.plan.outputs.version }}-${{ github.run_id }}
       - name: Check the wheel
         run: |
           # the file name, the METADATA version and the SASS of every architecture, sm_100a / sm_103a
