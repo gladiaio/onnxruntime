@@ -20,6 +20,10 @@ on:
         description: build and check, publish nothing (even when released)
         type: boolean
         default: false
+      chain:
+        description: which run of one cold build this is (each resumes the previous one's ccache)
+        required: false
+        default: "1"
 
 # bash -eo pipefail: a failed script piped into tee fails its step
 defaults:
@@ -28,9 +32,10 @@ defaults:
 
 permissions:
   contents: write
+  actions: write  # a cold build that hits the job's time limit dispatches its next run
 
 env:
-  REV: "1"                       # bump when gladia/ changes: rebuilds the current upstream release
+  REV: "2"                    # bump when gladia/ changes: rebuilds the current upstream release
   IMAGE: nvidia/cuda:13.0.3-cudnn-devel-ubuntu24.04
   ARCHS: 75-real;80-real;86-real;89-real;90a-real;100-real;103-real;120a-real
   TRIVY_VERSION: "0.75.0"
@@ -104,23 +109,42 @@ jobs:
             ccache-cu130-${{ needs.plan.outputs.version }}-
             ccache-cu130-
       - name: Build the wheel
+        id: build
         run: |
           mkdir -p dist ccache
           start=$SECONDS
-          # 320 min: the step stops before the job's 355, leaving time to save the cache
-          timeout 320m docker run --rm -e VERSION -e REV -e MAX_JOBS -e ARCHS -e CCACHE_DIR=/ccache \
+          # 320 min: the step stops before the job's 355, leaving time to save the cache and to
+          # dispatch the next run, which resumes from it
+          rc=0
+          timeout 320m docker run --rm --name ortbuild -e VERSION -e REV -e MAX_JOBS -e ARCHS -e CCACHE_DIR=/ccache \
             -e CCACHE_MAXSIZE=8G -v "$PWD/src:/src" -v "$PWD/dist:/out" -v "$PWD/ccache:/ccache" \
             -v "$PWD/gladia-src/gladia:/gladia:ro" \
-            "$IMAGE" bash /gladia/build.sh "$VERSION" "$REV" /out
-          echo "built in $(( (SECONDS - start) / 60 )) min"
+            "$IMAGE" bash /gladia/build.sh "$VERSION" "$REV" /out || rc=$?
+          echo "timed_out=$([ "$rc" = 124 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "build step: $(( (SECONDS - start) / 60 )) min, exit ${rc}"
+          exit "$rc"
       - name: Save the compiler cache
         if: always()
-        run: sudo chown -R "$(id -u)" dist ccache
+        run: |
+          docker rm -f ortbuild >/dev/null 2>&1 || true
+          sudo chown -R "$(id -u)" dist ccache
       - if: always()
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ccache
           key: ccache-cu130-${{ needs.plan.outputs.version }}-${{ github.run_id }}
+      # a cold build longer than one job (4 vCPU): the next run resumes from the cache saved above.
+      # GITHUB_TOKEN may dispatch workflow_dispatch runs; at most 6 runs for one build
+      - name: Resume in the next run
+        if: always() && steps.build.outputs.timed_out == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHAIN: ${{ inputs.chain || '1' }}
+        run: |
+          if [ "$CHAIN" -ge 6 ]; then echo "::error::not built after $CHAIN runs"; exit 1; fi
+          gh workflow run release.yml -R "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" \
+            -f version="$VERSION" -f chain="$((CHAIN + 1))"
+          echo "dispatched run $((CHAIN + 1)) of this build"
       - name: Check the wheel
         run: |
           # the file name, the METADATA version and the SASS of every architecture, sm_100a / sm_103a
