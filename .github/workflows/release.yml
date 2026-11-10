@@ -122,6 +122,7 @@ jobs:
       - name: Build the wheel
         id: build
         run: |
+          rm -rf dist  # only this run's wheel (a self-hosted workspace persists between runs)
           mkdir -p dist ccache
           start=$SECONDS
           # 320 min: the step stops before the job's 355, leaving time to save the cache and to
@@ -161,7 +162,7 @@ jobs:
           # the file name, the METADATA version and the SASS of every architecture, sm_100a / sm_103a
           # included (cuobjdump of the toolkit)
           docker run --rm -v "$PWD/dist:/dist:ro" -v "$PWD/gladia-src/gladia:/gladia:ro" "$IMAGE" \
-            bash -c 'apt-get update -qq &&
+            bash -c 'for i in 1 2 3 4 5; do apt-get update -qq && break; sleep 30; done &&
               apt-get install -y -qq --no-install-recommends python3 >/dev/null &&
               python3 /gladia/check_wheel.py /dist/*.whl --version "$0" --rev "$1" --archs "$2"' \
             "$VERSION" "$REV" "$ARCHS"
