@@ -17,6 +17,12 @@ MAX_JOBS="${MAX_JOBS:-16}"
 ARCHS="${ARCHS:-75-real;80-real;86-real;89-real;90a-real;100-real;103-real;120a-real}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 export DEBIAN_FRONTEND=noninteractive
+# APT_MIRROR: another official Ubuntu mirror when archive / security.ubuntu.com are unreachable from
+# the build host (apt checks Ubuntu's signatures whichever mirror serves the files)
+if [ -n "${APT_MIRROR:-}" ]; then
+  sed -i "s|http://archive.ubuntu.com/ubuntu/|${APT_MIRROR}/|; s|http://security.ubuntu.com/ubuntu/|${APT_MIRROR}/|" \
+    /etc/apt/sources.list.d/ubuntu.sources
+fi
 for i in 1 2 3 4 5; do apt-get update -qq && break; sleep 30; done
 apt-get install -y -qq git python3 python3-dev python3-venv ninja-build build-essential ccache \
     ca-certificates >/dev/null
