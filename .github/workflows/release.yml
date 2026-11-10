@@ -75,7 +75,7 @@ jobs:
     # our own runner: an ephemeral, repo-scoped runner (label ort-build) registered for one release;
     # the attestation below records which runner built the wheel
     runs-on: ${{ inputs.runner == 'ort-build' && fromJSON('["self-hosted","ort-build"]') || 'ubuntu-24.04' }}
-    timeout-minutes: 355
+    timeout-minutes: 360
     env:
       VERSION: ${{ needs.plan.outputs.version }}
       MAX_JOBS: ${{ inputs.runner == 'ort-build' && '64' || '4' }}
@@ -128,10 +128,10 @@ jobs:
           rm -rf dist  # only this run's wheel (a self-hosted workspace persists between runs)
           mkdir -p dist ccache
           start=$SECONDS
-          # 320 min: the step stops before the job's 355, leaving time to save the cache and to
-          # dispatch the next run, which resumes from it
+          # 290 min: the step stops well before the job's 360, leaving time to save the cache and
+          # to dispatch the next run, which resumes from it (a step killed with the job dispatches nothing)
           rc=0
-          timeout 320m docker run --rm --name ortbuild -e VERSION -e REV -e MAX_JOBS -e ARCHS -e APT_MIRROR \
+          timeout 290m docker run --rm --name ortbuild -e VERSION -e REV -e MAX_JOBS -e ARCHS -e APT_MIRROR \
             -e CCACHE_DIR=/ccache \
             -e CCACHE_MAXSIZE=8G -v "$PWD/src:/src" -v "$PWD/dist:/out" -v "$PWD/ccache:/ccache" \
             -v "$PWD/gladia-src/gladia:/gladia:ro" \
@@ -151,8 +151,10 @@ jobs:
           key: ccache-cu130-${{ needs.plan.outputs.version }}-${{ github.run_id }}
       # a cold build longer than one job (4 vCPU): the next run resumes from the cache saved above.
       # GITHUB_TOKEN may dispatch workflow_dispatch runs; at most 6 runs for one build
+      # also when the build step itself failed or was killed: the wheel was not produced, so the
+      # next run must resume from the cache saved above
       - name: Resume in the next run
-        if: always() && steps.build.outputs.timed_out == 'true'
+        if: always() && steps.build.outputs.timed_out == 'true' || always() && steps.build.outcome != 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CHAIN: ${{ inputs.chain || '1' }}
