@@ -32,9 +32,16 @@ The workflow (`.github/workflows/release.yml`) runs these steps:
 1. **plan**: `gladia/plan.sh` reads PyPI's latest version (or the dispatch input) and the tag it
    would release, and says whether to build.
 2. **build**: checks out upstream at `v<version>` and runs `gladia/build.sh` in the CUDA devel
-   image, with ccache kept across runs (`actions/cache`). A cold build of 1.31.1 took 1 h 25 on 64
-   cores; the hosted runner has 4 (16 GB RAM, a 24 GB swap file), so the job's ceiling is 6 h and a
-   cold build is expected to use most of it.
+   image, with ccache kept across runs (`actions/cache/restore` + `save`, saved even when the step
+   times out, so a cold build resumes in the next run).
+
+   **A cold build does not fit a GitHub-hosted runner.** 1.31.1 took 1 h 25 on 64 cores; a hosted
+   `ubuntu-24.04` has 4, and the first run (2026-11-09) was still compiling after 3 h 30 with the
+   job's 6 h ceiling ahead of it. Larger hosted runners are not enabled for the organization (a
+   probe job on `ubuntu-24.04-8core` / `-16core` / `-32core` stayed queued). So a release is built
+   either on a machine with enough cores, by running the same `gladia/build.sh` with the same image
+   and arguments, or by letting the workflow resume a cold build across runs through ccache (each
+   run compiles for ~5 h and saves what it did).
 3. **check**: `gladia/check_wheel.py` checks the file name, the METADATA version, and the SASS of
    the CUDA provider with `cuobjdump`: every architecture of the recipe, `sm_100a` and `sm_103a`
    included. The wheel is then installed and imported (no GPU).
