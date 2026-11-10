@@ -24,6 +24,11 @@ on:
         description: which run of one cold build this is (each resumes the previous one's ccache)
         required: false
         default: "1"
+      runner:
+        description: "hosted: GitHub's ubuntu-24.04 (4 vCPU, resumes across runs); ort-build: our own ephemeral runner (64 jobs, one run)"
+        type: choice
+        options: [hosted, ort-build]
+        default: hosted
 
 # bash -eo pipefail: a failed script piped into tee fails its step
 defaults:
@@ -67,11 +72,13 @@ jobs:
     name: Build ${{ needs.plan.outputs.local_version }}
     needs: plan
     if: needs.plan.outputs.build == 'true'
-    runs-on: ubuntu-24.04
+    # our own runner: an ephemeral, repo-scoped runner (label ort-build) registered for one release;
+    # the attestation below records which runner built the wheel
+    runs-on: ${{ inputs.runner == 'ort-build' && fromJSON('["self-hosted","ort-build"]') || 'ubuntu-24.04' }}
     timeout-minutes: 355
     env:
       VERSION: ${{ needs.plan.outputs.version }}
-      MAX_JOBS: "4"
+      MAX_JOBS: ${{ inputs.runner == 'ort-build' && '64' || '4' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -84,6 +91,7 @@ jobs:
           path: src
       # the CUDA devel image and the build tree need ~40 GB: drop the runner's preinstalled toolchains
       - name: Free disk space
+        if: inputs.runner != 'ort-build'  # a hosted runner's own toolchains; never on our host
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL \
             /usr/local/share/boost /usr/local/.ghcup /opt/microsoft /usr/share/swift
@@ -92,6 +100,7 @@ jobs:
       # 16 GB of RAM: ORT's CUDA provider compiles many translation units at once and nvcc takes
       # several GB; 4 jobs and a swap file absorb the peaks (a 64-core host with 200 GB took 1 h 25)
       - name: Swap
+        if: inputs.runner != 'ort-build'  # a hosted runner's 16 GB; never on our host
         run: |
           sudo swapoff -a || true
           sudo fallocate -l 24G /swapfile2 && sudo chmod 600 /swapfile2
@@ -101,7 +110,9 @@ jobs:
       # changed (the first build of a release is cold: 6 h is the job's ceiling, a cold build fits)
       # restore only: the save below runs even when the build stops at its time limit, so a cold
       # build that does not fit one job resumes in the next run from what it compiled
-      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+      # our own runner builds in one run from an empty cache
+      - if: inputs.runner != 'ort-build'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ccache
           key: ccache-cu130-${{ needs.plan.outputs.version }}-${{ github.run_id }}
@@ -128,7 +139,7 @@ jobs:
         run: |
           docker rm -f ortbuild >/dev/null 2>&1 || true
           sudo chown -R "$(id -u)" dist ccache
-      - if: always()
+      - if: always() && inputs.runner != 'ort-build'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ccache
