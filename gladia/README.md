@@ -38,10 +38,11 @@ The workflow (`.github/workflows/release.yml`) runs these steps:
    **A cold build does not fit a GitHub-hosted runner.** 1.31.1 took 1 h 25 on 64 cores; a hosted
    `ubuntu-24.04` has 4, and the first run (2026-11-09) was still compiling after 3 h 30 with the
    job's 6 h ceiling ahead of it. Larger hosted runners are not enabled for the organization (a
-   probe job on `ubuntu-24.04-8core` / `-16core` / `-32core` stayed queued). So a release is built
-   either on a machine with enough cores, by running the same `gladia/build.sh` with the same image
-   and arguments, or by letting the workflow resume a cold build across runs through ccache (each
-   run compiles for ~5 h and saves what it did).
+   probe job on `ubuntu-24.04-8core` / `-16core` / `-32core` stayed queued). So the build step
+   stops at 320 min, the job saves its ccache and dispatches the next run (`chain` input, at most
+   6), which resumes from it; the run that finishes checks, scans, attests and publishes.
+   `v1.31.1-gladia-cu130.1` was built by the same script on one of our own hosts and is not
+   attested; `v1.31.1-gladia-cu130.2` is the workflow's.
 3. **check**: `gladia/check_wheel.py` checks the file name, the METADATA version, and the SASS of
    the CUDA provider with `cuobjdump`: every architecture of the recipe, `sm_100a` and `sm_103a`
    included. The wheel is then installed and imported (no GPU).
