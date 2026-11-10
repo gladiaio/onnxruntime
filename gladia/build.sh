@@ -17,7 +17,7 @@ MAX_JOBS="${MAX_JOBS:-16}"
 ARCHS="${ARCHS:-75-real;80-real;86-real;89-real;90a-real;100-real;103-real;120a-real}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
+for i in 1 2 3 4 5; do apt-get update -qq && break; sleep 30; done
 apt-get install -y -qq git python3 python3-dev python3-venv ninja-build build-essential ccache \
     ca-certificates >/dev/null
 nvcc --version
